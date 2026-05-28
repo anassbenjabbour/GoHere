@@ -142,7 +142,6 @@ function App() {
   const lastRouteKeyRef = useRef('');
   const gpsWatchIdRef = useRef<number | null>(null);
   const [showVisitedMarkers, setShowVisitedMarkers] = useState(true);
-  const [showProfilePreview, setShowProfilePreview] = useState(false);
 
   const routeSummary = useMemo(() => {
     if (!route) {
@@ -520,6 +519,16 @@ function App() {
     await selectDestination(mode);
   }
 
+  function endRoute(): void {
+    setDestination(null);
+    setRoute(null);
+    setSearchResults([]);
+    lastRouteOriginRef.current = null;
+    lastRouteKeyRef.current = '';
+    setLoadingAction(null);
+    setNotice('Route ended. Tap Random for a new destination.');
+  }
+
   return (
     <div className="app-shell scanlines">
       <div className="map-stage">
@@ -533,11 +542,13 @@ function App() {
           {destination && <Marker position={[destination.lat, destination.lon]} icon={destinationMarkerIcon} />}
           {route?.polyline.length ? <Polyline positions={route.polyline.map((point) => [point.lat, point.lon] as [number, number])} pathOptions={{ color: '#e3c84b', weight: 4, opacity: 0.9 }} /> : null}
           {destination ? <CircleMarker center={[destination.lat, destination.lon]} radius={36} pathOptions={{ color: '#9d9d9d', weight: 1, fillOpacity: 0.08 }} /> : null}
-          {history.slice(0, 6).map((entry) => (
-            <Marker key={entry.id} position={[entry.lat, entry.lon]} icon={historyMarkerIcon}>
-              <Popup>{entry.label}</Popup>
-            </Marker>
-          ))}
+          {showVisitedMarkers
+            ? history.slice(0, 6).map((entry) => (
+                <Marker key={entry.id} position={[entry.lat, entry.lon]} icon={historyMarkerIcon}>
+                  <Popup>{entry.label}</Popup>
+                </Marker>
+              ))
+            : null}
         </MapContainer>
       </div>
 
@@ -554,17 +565,9 @@ function App() {
           <span>3</span>
           <strong>Random</strong>
         </button>
-        <button
-          className="nav-item"
-          onClick={() => {
-            setShowProfilePreview((currentValue) => !currentValue);
-            if (recentEntries[0]) {
-              void revisit(recentEntries[0]);
-            }
-          }}
-        >
+        <button className="nav-item" onClick={() => endRoute()}>
           <span>4</span>
-          <strong>Profile</strong>
+          <strong>End Route</strong>
         </button>
         <button
           className="nav-item"
