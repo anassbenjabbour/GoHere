@@ -32,13 +32,25 @@ export default defineConfig({
         navigateFallback: '/index.html',
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.origin === 'https://tile.openstreetmap.org',
+            urlPattern: ({ url }) => {
+              if (url.origin !== 'https://tile.openstreetmap.org') {
+                return false;
+              }
+
+              const tilePathSegments = url.pathname.split('/').filter(Boolean);
+              if (tilePathSegments.length < 3) {
+                return false;
+              }
+
+              const zoom = Number(tilePathSegments[0]);
+              return Number.isFinite(zoom) && zoom >= 11 && zoom <= 17;
+            },
             handler: 'CacheFirst',
             options: {
-              cacheName: 'osm-tiles',
+              cacheName: 'osm-city-pack-v1',
               expiration: {
-                maxEntries: 400,
-                maxAgeSeconds: 60 * 60 * 24 * 30
+                maxEntries: 280,
+                maxAgeSeconds: 60 * 60 * 24 * 14
               },
               cacheableResponse: {
                 statuses: [0, 200]

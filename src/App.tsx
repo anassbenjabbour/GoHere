@@ -29,6 +29,7 @@ import {
   reverseGeocode,
   searchNearbyPlaces as searchNearbyPlacesApi,
 } from './lib/api';
+import { prefetchCityTiles } from './lib/offlineTiles';
 import { bearingDegrees, formatCoords as formatCoordinates, formatDistance, formatDuration, formatMeters, haversineDistanceMeters, placeSignature } from './lib/geo';
 import type { Coordinates, ExplorationMode, ExplorationScope, HistoryEntry, PlaceCandidate, RouteResult } from './lib/types';
 
@@ -174,8 +175,11 @@ function App() {
   const [preserveZoom, setPreserveZoom] = useState(false);
   const lastRouteOriginRef = useRef<Coordinates | null>(null);
   const lastRouteKeyRef = useRef('');
+  const lastOfflinePackOriginRef = useRef<Coordinates | null>(null);
   const gpsWatchIdRef = useRef<number | null>(null);
-  const [showVisitedMarkers, setShowVisitedMarkers] = useState(true);
+  const [showVisitedPopup, setShowVisitedPopup] = useState(false);
+  const [offlineCityTileCount, setOfflineCityTileCount] = useState<number | null>(null);
+  const showVisitedMarkers = true;
 
   const routeSummary = useMemo(() => {
     if (!route) {
@@ -248,6 +252,38 @@ function App() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  useEffect(() => {
+    if (!origin || offline || !('caches' in window)) {
+      return;
+    }
+
+    if (lastOfflinePackOriginRef.current && haversineDistanceMeters(lastOfflinePackOriginRef.current, origin) < 3_000) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const downloadedTiles = await prefetchCityTiles(origin);
+        if (cancelled) {
+          return;
+        }
+
+        lastOfflinePackOriginRef.current = origin;
+        setOfflineCityTileCount(downloadedTiles);
+      } catch {
+        if (!cancelled) {
+          setOfflineCityTileCount(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [offline, origin]);
 
   useEffect(() => {
     return () => {
@@ -615,14 +651,51 @@ function App() {
         </div>
       </div>
 
+      {showVisitedPopup ? (
+        <div className="visited-modal-backdrop" role="presentation" onClick={() => setShowVisitedPopup(false)}>
+          <section className="visited-modal" role="dialog" aria-modal="true" aria-label="Visited places" onClick={(event) => event.stopPropagation()}>
+            <header className="visited-modal-header">
+              <h2>Visited Places</h2>
+              <button type="button" className="visited-close" onClick={() => setShowVisitedPopup(false)}>
+                Close
+              </button>
+            </header>
+            <p className="visited-modal-subtitle">
+              {offlineCityTileCount !== null ? `Offline city tiles ready: ${offlineCityTileCount}` : 'Offline city map pack is preparing...'}
+            </p>
+            <div className="visited-modal-list">
+              {history.length ? (
+                history.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className="visited-entry"
+                    onClick={() => {
+                      void revisit(entry);
+                      setShowVisitedPopup(false);
+                    }}
+                  >
+                    <strong>{entry.name}</strong>
+                    <span>{`${formatDistance(entry.distanceMeters)} • ${new Date(entry.generatedAt).toLocaleString()}`}</span>
+                  </button>
+                ))
+              ) : (
+                <p className="visited-empty">No random places visited yet.</p>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       <nav className="bottom-nav" aria-label="Main navigation">
         <button className="nav-item" onClick={() => void requestGpsAccess()}>
           <span>1</span>
           <strong>Location</strong>
         </button>
-        <button className="nav-item" onClick={() => setShowVisitedMarkers((currentValue) => !currentValue)}>
+        <button className="nav-item" onClick={() => setShowVisitedPopup(true)}>
           <span>2</span>
           <strong>Visited</strong>
+          <span className="nav-subtitle">{history.length}</span>
         </button>
         <button className="nav-item nav-center" onClick={() => void triggerRandomRoute()}>
           <span>3</span>
