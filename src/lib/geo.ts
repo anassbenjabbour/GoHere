@@ -76,6 +76,14 @@ export function formatDistance(meters: number): string {
   return `${(meters / 1_000).toFixed(meters >= 10_000 ? 0 : 1)} km`;
 }
 
+export function formatMeters(meters: number): string {
+  if (!Number.isFinite(meters)) {
+    return '--';
+  }
+
+  return `${Math.max(0, Math.round(meters))} m`;
+}
+
 export function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds)) {
     return '--';

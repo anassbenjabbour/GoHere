@@ -7,6 +7,7 @@ import {
   Polyline,
   Popup,
   TileLayer,
+  useMapEvents,
   useMap,
 } from 'react-leaflet';
 import {
@@ -28,7 +29,7 @@ import {
   reverseGeocode,
   searchNearbyPlaces as searchNearbyPlacesApi,
 } from './lib/api';
-import { bearingDegrees, formatCoords as formatCoordinates, formatDistance, formatDuration, haversineDistanceMeters, placeSignature } from './lib/geo';
+import { bearingDegrees, formatCoords as formatCoordinates, formatDistance, formatDuration, formatMeters, haversineDistanceMeters, placeSignature } from './lib/geo';
 import type { Coordinates, ExplorationMode, ExplorationScope, HistoryEntry, PlaceCandidate, RouteResult } from './lib/types';
 
 const DEFAULT_CENTER: Coordinates = {
@@ -85,12 +86,14 @@ function MapFocus({
   route,
   focusNonce,
   followUser,
+  preserveZoom,
 }: {
   origin: Coordinates | null;
   destination: PlaceCandidate | null;
   route: RouteResult | null;
   focusNonce: number;
   followUser: boolean;
+  preserveZoom: boolean;
 }) {
   const map = useMap();
   const lastFocusKey = useRef('');
@@ -111,6 +114,11 @@ function MapFocus({
     }
 
     if (route?.polyline.length) {
+      if (preserveZoom) {
+        map.panTo([origin?.lat ?? route.polyline[0].lat, origin?.lon ?? route.polyline[0].lon], { animate: true, duration: 0.8 });
+        return;
+      }
+
       const bounds = L.latLngBounds(route.polyline.map((point) => [point.lat, point.lon] as [number, number]));
       map.fitBounds(bounds.pad(0.25), { animate: true, duration: 0.9 });
       return;
@@ -124,7 +132,23 @@ function MapFocus({
     if (destination) {
       map.flyTo([destination.lat, destination.lon], 13, { animate: true, duration: 0.8 });
     }
-  }, [destination, focusNonce, map, origin, route]);
+  }, [destination, focusNonce, followUser, map, origin, preserveZoom, route]);
+
+  return null;
+}
+
+function MapEvents({ onUserZoom, onUserPan }: { onUserZoom: () => void; onUserPan: () => void }) {
+  useMapEvents({
+    zoomstart() {
+      onUserZoom();
+    },
+    zoomend() {
+      onUserZoom();
+    },
+    dragend() {
+      onUserPan();
+    },
+  });
 
   return null;
 }
@@ -147,6 +171,7 @@ function App() {
   const [followUserLocation, setFollowUserLocation] = useState(true);
   const [explorationScope, setExplorationScope] = useState<ExplorationScope>('city');
   const [focusNonce, setFocusNonce] = useState(0);
+  const [preserveZoom, setPreserveZoom] = useState(false);
   const lastRouteOriginRef = useRef<Coordinates | null>(null);
   const lastRouteKeyRef = useRef('');
   const gpsWatchIdRef = useRef<number | null>(null);
@@ -178,6 +203,14 @@ function App() {
       deltaBearing,
     };
   }, [destination, heading, origin]);
+
+  const destinationDistanceMeters = routeProgress?.straightDistanceMeters ?? null;
+  const remainingRouteMeters = route?.distanceMeters ?? routeProgress?.straightDistanceMeters ?? null;
+  const tripAwayLabel = destinationDistanceMeters !== null ? formatDistance(destinationDistanceMeters) : null;
+  const tripLeftLabel = remainingRouteMeters !== null ? formatDistance(remainingRouteMeters) : null;
+  const tripProgressPercent = route && route.distanceMeters > 0 && remainingRouteMeters !== null
+    ? Math.max(0, Math.min(100, ((route.distanceMeters - remainingRouteMeters) / route.distanceMeters) * 100))
+    : null;
 
   const nearbyRecentSignatures = useMemo(() => history.slice(0, 8).map((entry) => placeSignature(entry.name, { lat: entry.lat, lon: entry.lon })), [history]);
 
@@ -543,18 +576,20 @@ function App() {
     lastRouteOriginRef.current = null;
     lastRouteKeyRef.current = '';
     setLoadingAction(null);
+    setPreserveZoom(false);
     setNotice('Route ended. Tap Random for a new destination.');
   }
 
   return (
     <div className="app-shell scanlines">
       <div className="map-stage">
-        <MapContainer center={[DEFAULT_CENTER.lat, DEFAULT_CENTER.lon]} zoom={12} zoomControl={true} scrollWheelZoom>
+        <MapContainer center={[DEFAULT_CENTER.lat, DEFAULT_CENTER.lon]} zoom={12} zoomControl={true} scrollWheelZoom touchZoom doubleClickZoom>
           <TileLayer
             url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           />
-          <MapFocus origin={origin} destination={destination} route={route} focusNonce={focusNonce} followUser={followUserLocation} />
+          <MapEvents onUserZoom={() => setPreserveZoom(true)} onUserPan={() => setPreserveZoom(true)} />
+          <MapFocus origin={origin} destination={destination} route={route} focusNonce={focusNonce} followUser={followUserLocation} preserveZoom={preserveZoom} />
           {origin && <Marker position={[origin.lat, origin.lon]} icon={originMarkerIcon} />}
           {destination && <Marker position={[destination.lat, destination.lon]} icon={destinationMarkerIcon} />}
           {route?.polyline.length ? <Polyline positions={route.polyline.map((point) => [point.lat, point.lon] as [number, number])} pathOptions={{ color: '#e3c84b', weight: 4, opacity: 0.9 }} /> : null}
@@ -569,6 +604,17 @@ function App() {
         </MapContainer>
       </div>
 
+      <div className="trip-hud">
+        <div className="trip-hud-title">TRIP STATUS</div>
+        <div className="trip-hud-row">
+          <span>{tripAwayLabel !== null ? `${tripAwayLabel} away` : 'No destination'}</span>
+          <span>{tripLeftLabel !== null ? `${tripLeftLabel} left` : '0 m left'}</span>
+        </div>
+        <div className="trip-hud-bar" aria-hidden="true">
+          <div className="trip-hud-fill" style={{ width: `${tripProgressPercent ?? 0}%` }} />
+        </div>
+      </div>
+
       <nav className="bottom-nav" aria-label="Main navigation">
         <button className="nav-item" onClick={() => void requestGpsAccess()}>
           <span>1</span>
@@ -581,6 +627,12 @@ function App() {
         <button className="nav-item nav-center" onClick={() => void triggerRandomRoute()}>
           <span>3</span>
           <strong>Random</strong>
+          <span className="nav-subtitle">
+            {destinationDistanceMeters !== null ? `${formatMeters(destinationDistanceMeters)} away` : 'Tap for route'}
+          </span>
+          <span className="nav-subtitle nav-subtitle-muted">
+            {remainingRouteMeters !== null ? `${formatMeters(remainingRouteMeters)} left` : 'No route yet'}
+          </span>
         </button>
         <button className="nav-item" onClick={() => endRoute()}>
           <span>4</span>
