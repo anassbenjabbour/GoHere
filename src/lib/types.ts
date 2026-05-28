@@ -1,4 +1,5 @@
 export type ExplorationMode = 'nearby' | 'medium' | 'far' | 'anywhere';
+export type ExplorationScope = 'city' | 'country';
 
 export interface Coordinates {
   lat: number;

@@ -1,5 +1,5 @@
 import { bearingDegrees, destinationPoint, formatCoords, haversineDistanceMeters, placeSignature, randomPointBetween, routeKey } from './geo';
-import type { Coordinates, ExplorationMode, PlaceCandidate, RouteResult, RouteStep } from './types';
+import type { Coordinates, ExplorationMode, ExplorationScope, PlaceCandidate, RouteResult, RouteStep } from './types';
 
 interface OverpassElement {
   id: number;
@@ -59,6 +59,18 @@ const MODE_SETTINGS: Record<ExplorationMode, { minimumRadius: number; maximumRad
   medium: { minimumRadius: 3_000, maximumRadius: 15_000, queryRadius: 15_000 },
   far: { minimumRadius: 10_000, maximumRadius: 50_000, queryRadius: 50_000 },
   anywhere: { minimumRadius: 1_500, maximumRadius: 120_000, queryRadius: 120_000 },
+};
+
+const MOROCCO_BOUNDS = {
+  north: 35.95,
+  south: 27.65,
+  west: -13.3,
+  east: -0.9,
+};
+
+const CITY_MODE_SETTINGS: Record<ExplorationScope, { minimumRadius: number; maximumRadius: number; queryRadius: number }> = {
+  city: { minimumRadius: 500, maximumRadius: 8_000, queryRadius: 8_000 },
+  country: { minimumRadius: 5_000, maximumRadius: 220_000, queryRadius: 220_000 },
 };
 
 const PLACE_QUERY = `
@@ -203,8 +215,13 @@ function buildOverpassQuery(origin: Coordinates, radiusMeters: number): string {
   return PLACE_QUERY.replaceAll('__RADIUS__', String(radiusMeters)).replaceAll('__LAT__', String(origin.lat)).replaceAll('__LON__', String(origin.lon));
 }
 
-export async function findRandomDestination(origin: Coordinates, mode: ExplorationMode, recentNames: string[]): Promise<PlaceCandidate> {
-  const settings = MODE_SETTINGS[mode];
+export async function findRandomDestination(
+  origin: Coordinates,
+  mode: ExplorationMode,
+  recentNames: string[],
+  scope: ExplorationScope,
+): Promise<PlaceCandidate> {
+  const settings = scope === 'country' ? CITY_MODE_SETTINGS.country : CITY_MODE_SETTINGS.city;
   const recentSignatures = new Set(recentNames);
   const overpassUrl = 'https://overpass-api.de/api/interpreter';
   const overpassResponse = await fetchJson<OverpassResponse>(overpassUrl, {
@@ -220,14 +237,19 @@ export async function findRandomDestination(origin: Coordinates, mode: Explorati
     return candidate;
   }
 
-  return buildFallbackDestination(origin, mode, recentSignatures);
+  return buildFallbackDestination(origin, mode, recentSignatures, scope);
 }
 
-async function buildFallbackDestination(origin: Coordinates, mode: ExplorationMode, recentSignatures: Set<string>): Promise<PlaceCandidate> {
-  const settings = MODE_SETTINGS[mode];
+async function buildFallbackDestination(
+  origin: Coordinates,
+  mode: ExplorationMode,
+  recentSignatures: Set<string>,
+  scope: ExplorationScope,
+): Promise<PlaceCandidate> {
+  const settings = scope === 'country' ? CITY_MODE_SETTINGS.country : CITY_MODE_SETTINGS.city;
 
   for (let attemptIndex = 0; attemptIndex < 8; attemptIndex += 1) {
-    const projectedPoint = randomPointBetween(origin, settings.minimumRadius, settings.maximumRadius);
+    const projectedPoint = scope === 'country' ? randomPointInMorocco() : randomPointBetween(origin, settings.minimumRadius, settings.maximumRadius);
     const resolvedName = await reverseGeocode(projectedPoint);
     const signature = placeSignature(resolvedName, projectedPoint);
     if (recentSignatures.has(signature)) {
@@ -257,6 +279,18 @@ async function buildFallbackDestination(origin: Coordinates, mode: ExplorationMo
     source: 'fallback',
     tags: {},
   };
+}
+
+function randomPointInMorocco(): Coordinates {
+  for (let attemptIndex = 0; attemptIndex < 24; attemptIndex += 1) {
+    const lat = MOROCCO_BOUNDS.south + Math.random() * (MOROCCO_BOUNDS.north - MOROCCO_BOUNDS.south);
+    const lon = MOROCCO_BOUNDS.west + Math.random() * (MOROCCO_BOUNDS.east - MOROCCO_BOUNDS.west);
+    if (lat >= MOROCCO_BOUNDS.south && lat <= MOROCCO_BOUNDS.north && lon >= MOROCCO_BOUNDS.west && lon <= MOROCCO_BOUNDS.east) {
+      return { lat, lon };
+    }
+  }
+
+  return { lat: 32.0, lon: -6.0 };
 }
 
 export async function reverseGeocode(point: Coordinates): Promise<string> {

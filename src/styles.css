@@ -571,6 +571,14 @@ input::placeholder {
   letter-spacing: 0.08em;
 }
 
+.nav-subtitle {
+  font-size: 0.54rem;
+  line-height: 1.15;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .nav-item.active {
   border-color: rgba(227, 200, 75, 0.62);
   background: linear-gradient(180deg, rgba(64, 58, 18, 0.98), rgba(35, 34, 16, 0.98));
@@ -655,6 +663,10 @@ input::placeholder {
 
   .nav-item strong {
     font-size: 0.52rem;
+  }
+
+  .nav-subtitle {
+    font-size: 0.48rem;
   }
 
   .nav-center {

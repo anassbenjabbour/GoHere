@@ -29,7 +29,7 @@ import {
   searchNearbyPlaces as searchNearbyPlacesApi,
 } from './lib/api';
 import { bearingDegrees, formatCoords as formatCoordinates, formatDistance, formatDuration, haversineDistanceMeters, placeSignature } from './lib/geo';
-import type { Coordinates, ExplorationMode, HistoryEntry, PlaceCandidate, RouteResult } from './lib/types';
+import type { Coordinates, ExplorationMode, ExplorationScope, HistoryEntry, PlaceCandidate, RouteResult } from './lib/types';
 
 const DEFAULT_CENTER: Coordinates = {
   lat: 40.7128,
@@ -84,11 +84,13 @@ function MapFocus({
   destination,
   route,
   focusNonce,
+  followUser,
 }: {
   origin: Coordinates | null;
   destination: PlaceCandidate | null;
   route: RouteResult | null;
   focusNonce: number;
+  followUser: boolean;
 }) {
   const map = useMap();
   const lastFocusKey = useRef('');
@@ -102,6 +104,11 @@ function MapFocus({
     }
 
     lastFocusKey.current = focusKey;
+
+    if (followUser && origin) {
+      map.panTo([origin.lat, origin.lon], { animate: true, duration: 0.8 });
+      return;
+    }
 
     if (route?.polyline.length) {
       const bounds = L.latLngBounds(route.polyline.map((point) => [point.lat, point.lon] as [number, number]));
@@ -137,6 +144,8 @@ function App() {
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
   const [followCompass, setFollowCompass] = useState(false);
+  const [followUserLocation, setFollowUserLocation] = useState(true);
+  const [explorationScope, setExplorationScope] = useState<ExplorationScope>('city');
   const [focusNonce, setFocusNonce] = useState(0);
   const lastRouteOriginRef = useRef<Coordinates | null>(null);
   const lastRouteKeyRef = useRef('');
@@ -314,10 +323,11 @@ function App() {
     const effectiveOrigin = origin ?? DEFAULT_CENTER;
     setMode(selectionMode);
     setLoadingAction(selectionMode);
-    setNotice(`${origin ? 'Scanning' : 'Scanning with fallback coordinates'} ${MODE_LABELS[selectionMode].toLowerCase()}...`);
+    const scopeLabel = explorationScope === 'city' ? 'Kenitra area' : 'Morocco-wide';
+    setNotice(`${origin ? 'Scanning' : 'Scanning with fallback coordinates'} ${scopeLabel.toLowerCase()} ${MODE_LABELS[selectionMode].toLowerCase()}...`);
 
     try {
-      const destinationCandidate = await findRandomDestination(effectiveOrigin, selectionMode, nearbyRecentSignatures);
+      const destinationCandidate = await findRandomDestination(effectiveOrigin, selectionMode, nearbyRecentSignatures, explorationScope);
       const resolvedName = destinationCandidate.name || (await reverseGeocode(destinationCandidate));
       const place = {
         ...destinationCandidate,
@@ -419,6 +429,9 @@ function App() {
         setGpsAccuracy(position.coords.accuracy || null);
         setGpsStatus('locked');
         setNotice(`Coordinates locked at ${formatCoordinates(nextOrigin)}.`);
+        if (followUserLocation) {
+          setFocusNonce((currentValue) => currentValue + 1);
+        }
 
         if (gpsWatchIdRef.current !== null) {
           navigator.geolocation.clearWatch(gpsWatchIdRef.current);
@@ -433,6 +446,9 @@ function App() {
             setOrigin(watchedOrigin);
             setGpsAccuracy(watchPosition.coords.accuracy || null);
             setGpsStatus('locked');
+            if (followUserLocation) {
+              setFocusNonce((currentValue) => currentValue + 1);
+            }
           },
           () => {
             setGpsStatus('error');
@@ -474,7 +490,7 @@ function App() {
     }
 
     void requestGpsAccess();
-  }, []);
+  }, [followUserLocation]);
 
   async function toggleFavorite(entry: HistoryEntry): Promise<void> {
     const nextFavorite = !entry.favorite;
@@ -514,6 +530,7 @@ function App() {
   const currentLocationLabel = origin ? formatCoordinates(origin) : 'LOCKING...';
   const favoriteCount = history.filter((entry) => entry.favorite).length;
   const recentEntries = history.slice(0, 5);
+  const scopeLabel = explorationScope === 'city' ? 'Kenitra' : 'Morocco';
 
   async function triggerRandomRoute(): Promise<void> {
     await selectDestination(mode);
@@ -537,7 +554,7 @@ function App() {
             url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           />
-          <MapFocus origin={origin} destination={destination} route={route} focusNonce={focusNonce} />
+          <MapFocus origin={origin} destination={destination} route={route} focusNonce={focusNonce} followUser={followUserLocation} />
           {origin && <Marker position={[origin.lat, origin.lon]} icon={originMarkerIcon} />}
           {destination && <Marker position={[destination.lat, destination.lon]} icon={destinationMarkerIcon} />}
           {route?.polyline.length ? <Polyline positions={route.polyline.map((point) => [point.lat, point.lon] as [number, number])} pathOptions={{ color: '#e3c84b', weight: 4, opacity: 0.9 }} /> : null}
@@ -572,12 +589,13 @@ function App() {
         <button
           className="nav-item"
           onClick={() => {
-            setFollowCompass((currentValue) => !currentValue);
+            setExplorationScope((currentValue) => (currentValue === 'city' ? 'country' : 'city'));
             void centerOnOrigin();
           }}
         >
           <span>5</span>
-          <strong>Settings</strong>
+          <strong>Scope</strong>
+          <span className="nav-subtitle">{scopeLabel}</span>
         </button>
       </nav>
     </div>
