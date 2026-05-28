@@ -1,0 +1,1 @@
+{"name":"Go Here","short_name":"Go Here","description":"Retro terminal adventure map for random exploration.","start_url":"/","display":"standalone","background_color":"#050505","theme_color":"#0b0b0b","lang":"en","scope":"/","orientation":"portrait","icons":[{"src":"/pwa.svg","sizes":"any","type":"image/svg+xml"}]}
